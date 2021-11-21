@@ -4,10 +4,11 @@
 #SBATCH --output=/home/yb1025/Research/ML_2/robustness/Few-Shot-Learning-NLP/baseline_experimentation/roberta-base/fine-tuning/GLUE/SST-2/results/train/train.out
 #SBATCH --error=/home/yb1025/Research/ML_2/robustness/Few-Shot-Learning-NLP/baseline_experimentation/roberta-base/fine-tuning/GLUE/SST-2/results/train/train.err
 #SBATCH --export=ALL
-#SBATCH --time=10:0:00
+#SBATCH --time=50:0:00
 #SBATCH --nodes=1
 #SBATCH --tasks-per-node=1
 #SBATCH --cpus-per-task=1
+#SBATCH --gres=gpu:1
 #SBATCH --mem=40G
 #SBATCH -c 2
 
@@ -23,6 +24,5 @@ singularity \
 source /ext3/env.sh
 source /ext3/openmpi.sh
 source activate allegro_gym
-huggingface-cli login
 python run_hyperparameter_search.py 
 "
