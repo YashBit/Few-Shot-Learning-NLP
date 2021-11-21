@@ -1,103 +1,144 @@
-"""Run a hyperparameter search on a RoBERTa model fine-tuned on BoolQ.
-Example usage:
-    python run_hyperparameter_search.py BoolQ/
+
+
+# from huggingface_hub import create_repo
+# huggingface-cli login
+
+
+
+import transformers
+from datasets import load_dataset, load_metric
+from transformers import AutoTokenizer
+from transformers import AutoModelForSequenceClassification, TrainingArguments, Trainer
+import numpy as np
+
+
+#GLUE TASKS
+def compute_metrics(eval_pred):
+    predictions, labels = eval_pred
+    if task != "stsb":
+        predictions = np.argmax(predictions, axis=1)
+    else:
+        predictions = predictions[:, 0]
+    return metric.compute(predictions=predictions, references=labels)
+
+
+def preprocess_function(examples):
+    if sentence2_key is None:
+        return tokenizer(examples[sentence1_key], truncation=True, padding=True)
+    return tokenizer(examples[sentence1_key], examples[sentence2_key], truncation=True, padding=True)
+
+
+
+def model_init():
+    return AutoModelForSequenceClassification.from_pretrained(model_checkpoint, num_labels=num_labels)
+
+
+GLUE_TASKS = ["cola", "mnli", "mnli-mm", "mrpc", "qnli", "qqp", "rte", "sst2", "stsb", "wnli"]
+
+task = "sst2"
+model_checkpoint = "roberta-base"
+batch_size = 16
+
+
+actual_task = "mnli" if task == "mnli-mm" else task
+dataset = load_dataset("glue", actual_task)
+metric = load_metric('glue', actual_task)
+
+
 """
-import argparse
-import boolq
-import data_utils
-import finetuning_utils
-import json
-import pandas as pd
 
-from sklearn.model_selection import train_test_split
-from transformers import RobertaTokenizerFast
+Pre Process The Data
+
 
 """
-    You can use other objective functions than the eval loss
+tokenizer = AutoTokenizer.from_pretrained(model_checkpoint, use_fast=True)
+
+task_to_keys = {
+    "cola": ("sentence", None),
+    "mnli": ("premise", "hypothesis"),
+    "mnli-mm": ("premise", "hypothesis"),
+    "mrpc": ("sentence1", "sentence2"),
+    "qnli": ("question", "sentence"),
+    "qqp": ("question1", "question2"),
+    "rte": ("sentence1", "sentence2"),
+    "sst2": ("sentence", None),
+    "stsb": ("sentence1", "sentence2"),
+    "wnli": ("sentence1", "sentence2"),
+}
+
+sentence1_key, sentence2_key = task_to_keys[task]
+if sentence2_key is None:
+    print(f"Sentence: {dataset['train'][0][sentence1_key]}")
+else:
+    print(f"Sentence 1: {dataset['train'][0][sentence1_key]}")
+    print(f"Sentence 2: {dataset['train'][0][sentence2_key]}")
+
+
+preprocess_function(dataset['train'][:5])
+encoded_dataset = dataset.map(preprocess_function, batched=True)
 """
-parser = argparse.ArgumentParser(
-    description="Run a hyperparameter search for finetuning a RoBERTa model on the BoolQ dataset."
-)
-parser.add_argument(
-    "data_dir",
-    type=str,
-    help="Directory containing the BoolQ dataset. Can be downloaded from https://dl.fbaipublicfiles.com/glue/superglue/data/v2/BoolQ.zip.",
-)
-args = parser.parse_args()
-# Since the labels for the test set have not been released, we will use half of the
-# validation dataset as our test dataset for the purposes of this assignment.
-train_df = pd.read_json(f"{args.data_dir}/train.jsonl", lines=True, orient="records")
-val_df, test_df = train_test_split(
-    pd.read_json(f"{args.data_dir}/val.jsonl", lines=True, orient="records"),
-    test_size=0.5,
-)
-tokenizer = RobertaTokenizerFast.from_pretrained("roberta-base")
-train_data = boolq.BoolQDataset(train_df, tokenizer)
-val_data = boolq.BoolQDataset(val_df, tokenizer)
-test_data = boolq.BoolQDataset(test_df, tokenizer)
 
-# Search algorithm
+Finetune the model
 
+"""
 
-# Try with other search algorithms and see which one work the best for you. 
+num_labels = 3 if task.startswith("mnli") else 1 if task=="stsb" else 2
+model = AutoModelForSequenceClassification.from_pretrained(model_checkpoint, num_labels=num_labels)
+metric_name = "pearson" if task == "stsb" else "matthews_correlation" if task == "cola" else "accuracy"
+model_name = model_checkpoint.split("/")[-1]
 
-
-## TODO: Initialize a transformers.TrainingArguments object here for use in
-## training and tuning the model. Consult the assignment handout for some
-## sample hyperparameter values.
-training_args = TrainingArguments(
-    output_dir = '/scratch/yb1025/',
+args = TrainingArguments(
+    f"/home/yb1025/Research/ML_2/robustness/Few-Shot-Learning-NLP/baseline_experimentation/roberta-base/fine-tuning/GLUE/SST-2/model/{model_name}-finetuned-{task}",
     evaluation_strategy = "epoch",
-    num_train_epochs = 3,
-    per_device_train_batch_size = 8, 
-    # Put a dictionary in the range for the learning rate
+    save_strategy = "epoch",
+    learning_rate=2e-5,
+    per_device_train_batch_size=batch_size,
+    per_device_eval_batch_size=batch_size,
+    num_train_epochs=5,
+    weight_decay=0.01,
+    load_best_model_at_end=True,
+    metric_for_best_model=metric_name,
+    push_to_hub=False,
 )
-# Search for atleast 5 trials
 
-## TODO: Initialize a transformers.Trainer object and run a Bayesian
-## hyperparameter search for at least 5 trials (but not too many) on the 
-## learning rate. Hint: use the model_init() and
-## compute_metrics() methods from finetuning_utils.py as arguments to
-## trainer.hyperparameter_search(). Use the hp_space parameter to specify
-## your hyperparameter search space. (Note that this parameter takes a function
-## as its value.)
-## Also print out the run ID, objective value,
-## and hyperparameters of your best run.
 
-#Initialising the model
+
+validation_key = "validation_mismatched" if task == "mnli-mm" else "validation_matched" if task == "mnli" else "validation"
 trainer = Trainer(
-    args = training_args,
-    tokenizer = tokenizer,
-    train_dataset = train_data,
-    eval_dataset = val_data,
-    model_init = finetuning_utils.model_init(),
-    compute_metrics = finetuning_utils.compute_metrics(),
-    evaluation_strategy="epoch"
+    model,
+    args,
+    train_dataset=encoded_dataset["train"],
+    eval_dataset=encoded_dataset[validation_key],
+    tokenizer=tokenizer,
+    compute_metrics=compute_metrics
 )
 
-"""
-    RAYUNIFORM, UNIFORM RANGE OF VALUES 
-    1E-5 - 5E-5
-    HYPERPARAMTER SEARCH WILL CHANGE THE HYPER
-    MISSING IN HYPERPARAMETER SEARCH:
-    1. MANY ARGUMENTS ARE MISSING, check documentation 
-"""
+
+# Central Training
+trainer.train()
+
+trainer.evaluate()
 
 
+# SAVE THE MODEL: REMOTELY, AND ON HUGGING FACE WITH THE CORRECT NAME
+
+
+trainer = Trainer(
+    model_init=model_init,
+    args=args,
+    train_dataset=encoded_dataset["train"],
+    eval_dataset=encoded_dataset[validation_key],
+    tokenizer=tokenizer,
+    compute_metrics=compute_metrics
+)
+train_dataset = encoded_dataset["train"].shard(index=1, num_shards=10) 
+
+best_run = trainer.hyperparameter_search(n_trials=10, direction="maximize")
 #Create a small lambda function. 
 
-BestRun = trainer.hyperparameter_search(
-    log_to_file =True,
-    backend = "ray",
-    #Dictionary which returns the key of 
-    hp_space = lambda _: {"learning_rate": tune.uniform(1e-5, 5e-5)},
-    search_alg=BayesOptSearch(mode="min"), 
-    n_samples = 5, 
-    compute_objective = lambda metrics : metrics["eval_loss"]
-)
-print(BestRun.run_id)
-print(BestRun.objective)
-print(BestRun.hyperparameters)
+print(best_run.run_id)
+print(best_run.objective)
+print(best_run.hyperparameters)
 
 """
 RETURN OF THE HYPERPARAMETER ACCESS IT AS AN ATTRIBUTE . 
