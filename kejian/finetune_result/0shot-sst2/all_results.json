@@ -1,0 +1,15 @@
+{
+    "eval_accuracy": 0.5091743119266054,
+    "eval_loss": 0.6948091983795166,
+    "eval_mem_cpu_alloc_delta": 30281728,
+    "eval_mem_cpu_peaked_delta": 0,
+    "eval_mem_gpu_alloc_delta": 0,
+    "eval_mem_gpu_peaked_delta": 34652160,
+    "eval_runtime": 2.7288,
+    "eval_samples": 872,
+    "eval_samples_per_second": 319.552,
+    "init_mem_cpu_alloc_delta": 2193993728,
+    "init_mem_cpu_peaked_delta": 147619840,
+    "init_mem_gpu_alloc_delta": 499887104,
+    "init_mem_gpu_peaked_delta": 0
+}

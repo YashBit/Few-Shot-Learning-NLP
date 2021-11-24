@@ -120,6 +120,10 @@ class DataTrainingArguments:
         default=None, metadata={"help": "A csv or a json file containing the validation data."}
     )
     test_file: Optional[str] = field(default=None, metadata={"help": "A csv or a json file containing the test data."})
+    # add matthew 
+    use_matthews: Optional[bool] = field(
+        default=False, metadata={"help": "whether to use matthew correlation as eval metric"}
+    )
 
     def __post_init__(self):
         if self.task_name is not None:
@@ -135,7 +139,6 @@ class DataTrainingArguments:
             assert (
                 validation_extension == train_extension
             ), "`validation_file` should have the same extension (csv or json) as `train_file`."
-
 
 @dataclass
 class ModelArguments:
@@ -239,7 +242,7 @@ def main():
     # download the dataset.
     if data_args.task_name is not None:
         # Downloading and loading a dataset from the hub.
-        datasets = load_dataset("glue", data_args.task_name, cache_dir=model_args.cache_dir)
+        datasets = load_dataset("glue", data_args.task_name)
     else:
         # Loading a dataset from your local files.
         # CSV/JSON training and evaluation files are needed.
@@ -267,6 +270,8 @@ def main():
         else:
             # Loading a dataset from local json files
             datasets = load_dataset("json", data_files=data_files, cache_dir=model_args.cache_dir)
+
+
     # See more about loading any type of standard or custom dataset at
     # https://huggingface.co/docs/datasets/loading_datasets.html.
 
@@ -410,8 +415,6 @@ def main():
         metric = load_metric("glue", data_args.task_name)
     # TODO: When datasets metrics include regular accuracy, make an else here and remove special branch from
     # compute_metrics
-    # pearsonr = load_metric('pearsonr')
-
     from scipy import stats
   
     # You can define your custom compute_metrics function. It takes an `EvalPrediction` object (a namedtuple with a
@@ -420,6 +423,7 @@ def main():
         preds = p.predictions[0] if isinstance(p.predictions, tuple) else p.predictions
         preds = np.squeeze(preds) if is_regression else np.argmax(preds, axis=1)
         if data_args.task_name is not None:
+            metric = load_metric("glue", data_args.task_name)
             result = metric.compute(predictions=preds, references=p.label_ids)
             if len(result) > 1:
                 result["combined_score"] = np.mean(list(result.values())).item()
@@ -429,8 +433,14 @@ def main():
             CHANGE KS: NOV 7, use scipy pearsonr instead of HF
             """
             mse = ((preds - p.label_ids) ** 2).mean().item()
-            pearson_score = stats.pearsonr(preds,p.label_ids)[0]
-            return {"mse": mse, "pearsonr": pearson_score}
+            pearsonr_corr = stats.pearsonr(preds,p.label_ids)[0]
+            return {"mse": mse, "pearsonr": pearsonr_corr}
+        elif data_args.use_matthews:
+            metric = load_metric("matthews_correlation")
+            result = metric.compute(predictions=preds, references=p.label_ids)
+            if len(result) > 1:
+                result["combined_score"] = np.mean(list(result.values())).item()
+            return result
         else:
             return {"accuracy": (preds == p.label_ids).astype(np.float32).mean().item()}
 
@@ -530,7 +540,9 @@ def main():
             kwargs["dataset_tags"] = "glue"
             kwargs["dataset_args"] = data_args.task_name
             kwargs["dataset"] = f"GLUE {data_args.task_name.upper()}"
-
+        # KS 11232021 add non-glue finetuned model name     
+        else:
+            kwargs["dataset_args"] = data_args.task_name
         trainer.push_to_hub(**kwargs)
 
 
